@@ -86,14 +86,12 @@ if train_button:
         # ✅ Ensure it’s a 1D array
         arima_forecast = np.array(arima_forecast).flatten()
         actual = series[-len(arima_forecast):].values.flatten()
-
         results['ARIMA'] = arima_forecast
 
         forecast_df = pd.DataFrame({
             'Actual': actual,
             'ARIMA Forecast': arima_forecast
         })
-
         st.line_chart(forecast_df)
 
     # ---- LSTM ----
@@ -111,28 +109,4 @@ if train_button:
         y_train, y_test = y[:split], y[split:]
 
         model = build_lstm((X_train.shape[1], X_train.shape[2]))
-        model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=0)
-
-        last_seq = scaled[-seq_len:]
-        forecast_scaled = []
-        cur_seq = last_seq.copy()
-
-        for _ in range(forecast_days):
-            pred = model.predict(cur_seq.reshape(1, seq_len, 1), verbose=0)[0, 0]
-            forecast_scaled.append(pred)
-            cur_seq = np.vstack([cur_seq[1:], [[pred]]])
-
-        forecast_scaled = np.array(forecast_scaled).reshape(-1, 1)
-        forecast_inv = scaler.inverse_transform(forecast_scaled)
-        results['LSTM'] = forecast_inv.flatten()
-
-        st.line_chart(pd.DataFrame({
-            'Actual': series[-100:], 
-            'LSTM Forecast': forecast_inv.flatten()
-        }))
-
-# ----------------------------
-# Footer
-# ----------------------------
-st.markdown("---")
-st.markdown("**References:** ARIMA (statsmodels), LSTM (TensorFlow/Keras), yfinance for data.")
+        model.fit(X
