@@ -2,38 +2,39 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import matplotlib.pyplot as plt
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
-import tensorflow as tf
 
-# Streamlit Page Config
+# Streamlit App Config
 st.set_page_config(page_title="Time Series Forecasting", layout="wide")
-st.title("📈 Time Series Forecasting App")
+st.title("📈 Time Series Forecasting — Stock Price Prediction (ARIMA & LSTM)")
 
-# Sidebar
-st.sidebar.header("🔧 Model & Data Options")
-ticker = st.sidebar.text_input("Ticker (e.g., AAPL, MSFT, TCS.NS)", "AAPL")
-start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2018-01-01"))
-end_date = st.sidebar.date_input("End Date", pd.to_datetime("2024-12-31"))
-model_choice = st.sidebar.selectbox("Select Model", ["ARIMA", "LSTM", "Compare Both"])
-forecast_days = st.sidebar.number_input("Forecast Horizon (days)", min_value=1, max_value=60, value=7)
+# Sidebar Inputs
+st.sidebar.header("Model & Data Options")
+ticker = st.sidebar.text_input("Ticker (e.g. AAPL, MSFT, TCS.NS)", value="AAPL")
+start_date = st.sidebar.date_input("Start date", value=pd.to_datetime("2018-01-01"))
+end_date = st.sidebar.date_input("End date", value=pd.to_datetime("2024-12-31"))
+model_choice = st.sidebar.selectbox("Model", ["ARIMA", "LSTM", "Compare Both"])
+forecast_days = st.sidebar.number_input("Forecast horizon (days)", min_value=1, max_value=60, value=7)
 train_button = st.sidebar.button("Fetch & Train")
 
-# ------------------ Helper Functions ------------------
+# Cache Data
 @st.cache_data(ttl=3600)
 def load_data(ticker, start, end):
     df = yf.download(ticker, start=start, end=end, progress=False)
     if df.empty:
         return None
-    return df[['Close']]
+    return df[['Open', 'High', 'Low', 'Close', 'Volume']]
 
-def create_sequences(data, seq_len=60):
+# Utility functions
+def create_sequences(data, seq_length=60):
     X, y = [], []
-    for i in range(seq_len, len(data)):
-        X.append(data[i - seq_len:i])
-        y.append(data[i])
+    for i in range(seq_length, len(data)):
+        X.append(data[i - seq_length:i])
+        y.append(data[i, 0])
     return np.array(X), np.array(y)
 
 def build_lstm(input_shape):
@@ -47,17 +48,20 @@ def build_lstm(input_shape):
     model.compile(optimizer='adam', loss='mse')
     return model
 
-# ------------------ Main Execution ------------------
+def fit_arima(series, order=(5, 1, 0)):
+    model = ARIMA(series, order=order)
+    return model.fit()
+
+# Main
 if train_button:
     df = load_data(ticker, start_date, end_date)
     if df is None:
-        st.error("❌ No data fetched. Please check ticker or date range.")
+        st.error("No data fetched. Please check ticker symbol or date range.")
         st.stop()
 
-    st.subheader("📊 Historical Data")
-    st.line_chart(df["Close"])
-
-    series = df["Close"].dropna()
+    series = df['Close'].dropna()
+    st.subheader("📊 Historical Closing Prices")
+    st.line_chart(series)
 
     results = {}
 
@@ -66,21 +70,18 @@ if train_button:
         st.subheader("🔹 ARIMA Model Forecast")
 
         try:
-            arima_model = ARIMA(series, order=(5, 1, 0))
-            arima_fit = arima_model.fit()
+            arima_fit = fit_arima(series)
             arima_forecast = arima_fit.forecast(steps=forecast_days)
-
-            # Ensure shape correctness
             arima_forecast = np.array(arima_forecast).flatten()
-            actual = series[-forecast_days:].values.flatten()
 
-            # Create a proper DataFrame
-            forecast_df = pd.DataFrame({
-                "Actual": pd.Series(actual, index=series.index[-forecast_days:]),
-                "ARIMA Forecast": pd.Series(arima_forecast, index=pd.date_range(series.index[-1], periods=forecast_days+1, freq='B')[1:])
-            })
+            # Create future index for forecast
+            future_index = pd.date_range(start=series.index[-1], periods=forecast_days + 1, freq='B')[1:]
+            forecast_series = pd.Series(arima_forecast, index=future_index)
 
-            st.line_chart(forecast_df)
+            # Combine actual + forecast
+            combined_df = pd.concat([series[-100:], forecast_series])
+            st.line_chart(combined_df)
+            results["ARIMA"] = arima_forecast
 
         except Exception as e:
             st.error(f"Error in ARIMA model: {e}")
@@ -115,17 +116,18 @@ if train_button:
 
             preds_scaled = np.array(preds_scaled).reshape(-1, 1)
             preds = scaler.inverse_transform(preds_scaled).flatten()
+            results["LSTM"] = preds
 
-            # Future index
-            future_index = pd.date_range(start=series.index[-1], periods=forecast_days+1, freq='B')[1:]
+            # Create future index for forecast
+            future_index = pd.date_range(start=series.index[-1], periods=forecast_days + 1, freq='B')[1:]
             forecast_series = pd.Series(preds, index=future_index)
 
-            # Combine last 100 actuals + forecast
-            combined = pd.concat([
-                pd.Series(series[-100:], name="Actual"),
-                pd.Series(forecast_series, name="LSTM Forecast")
-            ])
+            # ✅ Flatten actuals before combining
+            last_actual = series[-100:].values.flatten()
+            actual_series = pd.Series(last_actual, index=series.index[-100:], name="Actual")
 
+            # Combine actual + forecast
+            combined = pd.concat([actual_series, forecast_series.rename("LSTM Forecast")])
             st.line_chart(combined)
 
         except Exception as e:
@@ -133,4 +135,4 @@ if train_button:
 
 # Footer
 st.markdown("---")
-st.markdown("Made with ❤️ using Streamlit, TensorFlow & Statsmodels")
+st.markdown("**References:** ARIMA (statsmodels), LSTM (TensorFlow/Keras), yfinance for stock data.")
