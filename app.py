@@ -66,7 +66,13 @@ if train_button:
         arima_forecast = arima_fit.forecast(steps=forecast_days)
         results['ARIMA'] = arima_forecast
 
-        st.line_chart(pd.DataFrame({'Actual': series[-100:], 'ARIMA Forecast': arima_forecast}))
+       # Ensure same length and 1D data before plotting
+arima_forecast = np.array(arima_forecast).flatten()
+forecast_df = pd.DataFrame({
+    'Actual': series[-len(arima_forecast):].values,
+    'ARIMA Forecast': arima_forecast
+})
+st.line_chart(forecast_df)
 
     if model_choice in ("LSTM", "Compare Both"):
         st.subheader("LSTM Model")
