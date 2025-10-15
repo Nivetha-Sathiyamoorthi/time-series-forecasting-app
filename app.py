@@ -10,9 +10,11 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 
+# Streamlit page setup
 st.set_page_config(page_title="Time Series Forecasting", layout="wide")
 st.title("📈 Time Series Forecasting — Stock Price Prediction (ARIMA & LSTM)")
 
+# Sidebar options
 st.sidebar.header("Model & Data Options")
 ticker = st.sidebar.text_input("Ticker (e.g. AAPL, MSFT, TCS.NS)", value="AAPL")
 start_date = st.sidebar.date_input("Start date", value=pd.to_datetime("2018-01-01"))
@@ -21,20 +23,23 @@ model_choice = st.sidebar.selectbox("Model", ["ARIMA", "LSTM", "Compare Both"])
 forecast_days = st.sidebar.number_input("Forecast horizon (days)", min_value=1, max_value=60, value=7)
 train_button = st.sidebar.button("Fetch & Train")
 
+# Cache data loading
 @st.cache_data(ttl=3600)
 def load_data(ticker, start, end):
     df = yf.download(ticker, start=start, end=end, progress=False)
     if df.empty:
         return None
-    return df[['Open','High','Low','Close','Volume']]
+    return df[['Open', 'High', 'Low', 'Close', 'Volume']]
 
+# Create sequences for LSTM
 def create_sequences(data, seq_length=60):
     X, y = [], []
     for i in range(seq_length, len(data)):
-        X.append(data[i-seq_length:i])
+        X.append(data[i - seq_length:i])
         y.append(data[i, 0])
     return np.array(X), np.array(y)
 
+# Build LSTM model
 def build_lstm(input_shape):
     model = Sequential([
         LSTM(64, return_sequences=True, input_shape=input_shape),
@@ -46,38 +51,45 @@ def build_lstm(input_shape):
     model.compile(optimizer='adam', loss='mse')
     return model
 
-def fit_arima(series, order=(5,1,0)):
+# Fit ARIMA
+def fit_arima(series, order=(5, 1, 0)):
     model = ARIMA(series, order=order)
     return model.fit()
 
+# Main app logic
 if train_button:
     df = load_data(ticker, start_date, end_date)
     if df is None:
-        st.error("No data fetched.")
+        st.error("No data fetched. Please check the ticker symbol.")
         st.stop()
+
     series = df['Close'].dropna()
+    st.subheader("📊 Historical Closing Prices")
     st.line_chart(series)
 
     results = {}
 
+    # ---- ARIMA ----
     if model_choice in ("ARIMA", "Compare Both"):
-        st.subheader("ARIMA Model")
+        st.subheader("🔹 ARIMA Model")
         arima_fit = fit_arima(series)
         arima_forecast = arima_fit.forecast(steps=forecast_days)
         results['ARIMA'] = arima_forecast
 
-       # Ensure same length and 1D data before plotting
-arima_forecast = np.array(arima_forecast).flatten()
-forecast_df = pd.DataFrame({
-    'Actual': series[-len(arima_forecast):].values,
-    'ARIMA Forecast': arima_forecast
-})
-st.line_chart(forecast_df)
+        # Plot ARIMA results
+        arima_forecast = np.array(arima_forecast).flatten()
+        forecast_df = pd.DataFrame({
+            'Actual': series[-len(arima_forecast):].values,
+            'ARIMA Forecast': arima_forecast
+        })
+        st.line_chart(forecast_df)
 
+    # ---- LSTM ----
     if model_choice in ("LSTM", "Compare Both"):
-        st.subheader("LSTM Model")
-        data_close = series.values.reshape(-1,1)
-        scaler = MinMaxScaler(feature_range=(0,1))
+        st.subheader("🔹 LSTM Model")
+
+        data_close = series.values.reshape(-1, 1)
+        scaler = MinMaxScaler(feature_range=(0, 1))
         scaled = scaler.fit_transform(data_close)
 
         seq_len = 60
@@ -92,14 +104,20 @@ st.line_chart(forecast_df)
         last_seq = scaled[-seq_len:]
         forecast_scaled = []
         cur_seq = last_seq.copy()
+
         for _ in range(forecast_days):
-            pred = model.predict(cur_seq.reshape(1, seq_len, 1), verbose=0)[0,0]
+            pred = model.predict(cur_seq.reshape(1, seq_len, 1), verbose=0)[0, 0]
             forecast_scaled.append(pred)
             cur_seq = np.vstack([cur_seq[1:], [[pred]]])
-        forecast_scaled = np.array(forecast_scaled).reshape(-1,1)
+
+        forecast_scaled = np.array(forecast_scaled).reshape(-1, 1)
         forecast_inv = scaler.inverse_transform(forecast_scaled)
         results['LSTM'] = forecast_inv.flatten()
 
-        st.line_chart(pd.DataFrame({'Actual': series[-100:], 'LSTM Forecast': forecast_inv.flatten()}))
+        st.line_chart(pd.DataFrame({
+            'Actual': series[-100:], 
+            'LSTM Forecast': forecast_inv.flatten()
+        }))
 
+st.markdown("---")
 st.markdown("**References:** ARIMA (statsmodels), LSTM (TensorFlow/Keras), yfinance for data.")
